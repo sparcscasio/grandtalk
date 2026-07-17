@@ -1,5 +1,15 @@
-.env
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
 .venv/
+venv/
+
+# Environment variables
+.env
+backend/.env
+
+# macOS
 .DS_Store
+
+# Arduino secret files
+esp32/secrets.h
