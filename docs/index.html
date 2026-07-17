@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1"
+  />
+
+  <meta
+    name="theme-color"
+    content="#315f4f"
+  />
+
+  <meta
+    name="description"
+    content="신조어가 섞인 문장을 쉬운 말로 바꾸어 조부모 기기로 전송하는 서비스"
+  />
+
+  <link
+    rel="manifest"
+    href="./manifest.json"
+  />
+
+  <link
+    rel="stylesheet"
+    href="./style.css"
+  />
+
+  <title>손주 말투 통역기</title>
+</head>
+
+<body>
+  <main class="shell">
+    <header class="page-header">
+      <p class="eyebrow">GRANDTALK</p>
+
+      <h1>손주 말투 통역기</h1>
+
+      <p class="header-description">
+        신조어가 섞인 문장을 쉬운 말로 바꾸고
+        조부모 기기로 전송함.
+      </p>
+    </header>
+
+    <!-- 입력 영역 -->
+    <section class="card">
+      <label
+        class="field-label"
+        for="sourceText"
+      >
+        보낼 문장
+      </label>
+
+      <textarea
+        id="sourceText"
+        rows="5"
+        maxlength="500"
+        placeholder="예: 오늘 급식 ㄹㅇ 개추임"
+      ></textarea>
+
+      <div class="grid two">
+        <label class="field-label">
+          보내는 사람
+
+          <input
+            id="senderId"
+            type="text"
+            autocomplete="off"
+          />
+        </label>
+
+        <label class="field-label">
+          받는 사람
+
+          <input
+            id="receiverId"
+            type="text"
+            autocomplete="off"
+          />
+        </label>
+      </div>
+
+      <div class="actions">
+        <button
+          id="previewBtn"
+          class="primary"
+          type="button"
+        >
+          통역하기
+        </button>
+
+        <button
+          id="clearBtn"
+          class="ghost"
+          type="button"
+        >
+          초기화
+        </button>
+      </div>
+
+      <p
+        id="status"
+        class="status"
+        aria-live="polite"
+      ></p>
+    </section>
+
+    <!-- 통역 결과 영역 -->
+    <section
+      id="resultCard"
+      class="card hidden"
+    >
+      <div class="result-head">
+        <h2>통역 결과</h2>
+
+        <span
+          id="llmBadge"
+          class="badge hidden"
+        ></span>
+      </div>
+
+      <label
+        class="field-label"
+        for="translatedText"
+      >
+        자동 통역문
+      </label>
+
+      <textarea
+        id="translatedText"
+        rows="5"
+        maxlength="500"
+      ></textarea>
+
+      <div
+        id="termList"
+        class="terms"
+      ></div>
+
+      <div class="actions">
+        <button
+          id="sendBtn"
+          class="primary"
+          type="button"
+        >
+          수정한 문장 전송
+        </button>
+      </div>
+
+      <p
+        id="sendStatus"
+        class="status"
+        aria-live="polite"
+      ></p>
+    </section>
+
+    <!-- 기기 수신함 확인 영역 -->
+    <section class="card compact">
+      <h2>기기 대기 메시지</h2>
+
+      <p class="section-description">
+        현재 받는 사람에게 도착한 읽지 않은 메시지를 확인함.
+      </p>
+
+      <button
+        id="checkBtn"
+        class="ghost"
+        type="button"
+      >
+        현재 수신함 확인
+      </button>
+
+      <pre id="pendingOutput">아직 조회하지 않음.</pre>
+    </section>
+  </main>
+
+  <!-- 전송 완료 팝업 -->
+  <div
+    id="successModal"
+    class="modal-backdrop hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="successModalTitle"
+    aria-describedby="successModalDescription"
+  >
+    <div class="success-modal">
+      <div
+        class="success-icon"
+        aria-hidden="true"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          width="38"
+          height="38"
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <path
+            d="M20 6L9 17L4 12"
+            stroke="currentColor"
+            stroke-width="2.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+      </div>
+
+      <h2 id="successModalTitle">
+        전송 완료
+      </h2>
+
+      <p id="successModalDescription">
+        조부모님의 기기로<br />
+        통역문을 전송했어요.
+      </p>
+
+      <button
+        id="closeSuccessModalBtn"
+        class="primary modal-confirm-button"
+        type="button"
+      >
+        확인
+      </button>
+    </div>
+  </div>
+
+  <script src="./config.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>

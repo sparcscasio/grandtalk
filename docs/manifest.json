@@ -1,0 +1,11 @@
+{
+  "name": "손주 말투 통역기",
+  "short_name": "GrandTalk",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f4f1e9",
+  "theme_color": "#315f4f",
+  "description": "신조어가 섞인 문장을 조부모가 이해하기 쉬운 말로 통역합니다.",
+  "icons": []
+}
