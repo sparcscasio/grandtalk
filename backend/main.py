@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from supabase import Client, create_client
+from fastapi.staticfiles import StaticFiles
 
 from translator import records, translator
 
@@ -22,6 +23,7 @@ if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 app = FastAPI(title="GrandTalk API", version="1.0.0")
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 origins = [x.strip() for x in os.getenv("ALLOWED_ORIGINS", "*").split(",") if x.strip()]
 app.add_middleware(
