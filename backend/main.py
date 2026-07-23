@@ -22,19 +22,42 @@ from translator import records, translator
 
 
 # ==================================================
-# 1. 기본 경로 및 환경변수
+# 1. 기본 경로
 # ==================================================
 
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent
+
 STATIC_DIR = BASE_DIR / "static"
+SYSTEM_AUDIO_DIR = STATIC_DIR / "system"
 TTS_DIR = STATIC_DIR / "tts"
 
-STATIC_DIR.mkdir(parents=True, exist_ok=True)
-TTS_DIR.mkdir(parents=True, exist_ok=True)
+STATIC_DIR.mkdir(
+    parents=True,
+    exist_ok=True,
+)
 
-SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SYSTEM_AUDIO_DIR.mkdir(
+    parents=True,
+    exist_ok=True,
+)
+
+TTS_DIR.mkdir(
+    parents=True,
+    exist_ok=True,
+)
+
+
+# ==================================================
+# 2. 환경변수
+# ==================================================
+
+SUPABASE_URL = os.getenv(
+    "SUPABASE_URL",
+    "",
+)
+
 SUPABASE_SERVICE_ROLE_KEY = os.getenv(
     "SUPABASE_SERVICE_ROLE_KEY",
     "",
@@ -45,7 +68,10 @@ PUBLIC_BASE_URL = os.getenv(
     "https://grandtalk-api.onrender.com",
 ).rstrip("/")
 
-if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+if (
+    not SUPABASE_URL
+    or not SUPABASE_SERVICE_ROLE_KEY
+):
     raise RuntimeError(
         "SUPABASE_URL과 "
         "SUPABASE_SERVICE_ROLE_KEY를 설정해야 함."
@@ -53,7 +79,85 @@ if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
 
 
 # ==================================================
-# 2. Supabase 및 FastAPI 초기화
+# 3. 시스템 안내 음성
+# ==================================================
+
+SYSTEM_PROMPTS: dict[str, str] = {
+    "tag_key.mp3": "키를 태그해 주세요.",
+    "loading.mp3": "정보를 불러오는 중입니다.",
+    "no_messages.mp3": (
+        "조회된 메시지가 없습니다."
+    ),
+    "first_message.mp3": (
+        "최초 메시지입니다."
+    ),
+    "last_message.mp3": (
+        "마지막 메시지입니다."
+    ),
+    "network_error.mp3": (
+        "서버 연결에 실패했습니다. "
+        "잠시 후 다시 시도해 주세요."
+    ),
+}
+
+
+def ensure_system_audio_files() -> None:
+    """
+    static/system 폴더에 안내 음성이 없으면
+    서버 시작 시 자동으로 생성한다.
+
+    파일을 Git에 포함했다면 생성 과정 없이
+    기존 파일을 그대로 사용한다.
+    """
+
+    for filename, text in SYSTEM_PROMPTS.items():
+        output_path = (
+            SYSTEM_AUDIO_DIR / filename
+        )
+
+        if (
+            output_path.exists()
+            and output_path.stat().st_size > 0
+        ):
+            continue
+
+        try:
+            print(
+                f"[system-audio] 생성: "
+                f"{filename}"
+            )
+
+            temporary_path = (
+                SYSTEM_AUDIO_DIR
+                / f"{filename}.tmp"
+            )
+
+            tts = gTTS(
+                text=text,
+                lang="ko",
+                slow=False,
+            )
+
+            tts.save(
+                str(temporary_path)
+            )
+
+            temporary_path.replace(
+                output_path
+            )
+
+        except Exception as exc:
+            print(
+                f"[system-audio] 생성 실패: "
+                f"{filename}: {exc}"
+            )
+
+
+ensure_system_audio_files()
+
+
+# ==================================================
+# 4. Supabase 및 FastAPI
 # ==================================================
 
 supabase: Client = create_client(
@@ -63,12 +167,14 @@ supabase: Client = create_client(
 
 app = FastAPI(
     title="GrandTalk API",
-    version="1.1.0",
+    version="1.2.0",
 )
 
 app.mount(
     "/static",
-    StaticFiles(directory=str(STATIC_DIR)),
+    StaticFiles(
+        directory=str(STATIC_DIR)
+    ),
     name="static",
 )
 
@@ -91,7 +197,7 @@ app.add_middleware(
 
 
 # ==================================================
-# 3. 요청 모델
+# 5. 요청 모델
 # ==================================================
 
 class TranslationRequest(BaseModel):
@@ -113,7 +219,9 @@ class TranslationRequest(BaseModel):
     use_llm: bool | None = None
 
 
-class MessageCreateRequest(TranslationRequest):
+class MessageCreateRequest(
+    TranslationRequest
+):
     corrected_text: str | None = Field(
         default=None,
         max_length=1000,
@@ -125,54 +233,59 @@ class ReadRequest(BaseModel):
 
 
 # ==================================================
-# 4. 감정·의도 데이터 정리 함수
+# 6. 데이터 정규화
 # ==================================================
 
-def normalize_text_list(value: Any) -> list[str]:
-    """
-    Supabase JSONB가 list, 문자열, None 등으로
-    반환되는 경우를 모두 list[str]로 정리한다.
-    """
-
+def normalize_text_list(
+    value: Any,
+) -> list[str]:
     if value is None:
         return []
 
     if isinstance(value, str):
-        stripped = value.strip()
+        text = value.strip()
 
-        if not stripped:
+        if not text:
             return []
 
-        return [stripped]
+        return [text]
 
-    if isinstance(value, (list, tuple, set)):
+    if isinstance(
+        value,
+        (list, tuple, set),
+    ):
         result: list[str] = []
 
         for item in value:
             text = str(item).strip()
 
-            if text and text not in result:
+            if (
+                text
+                and text not in result
+            ):
                 result.append(text)
 
         return result
 
     text = str(value).strip()
 
-    return [text] if text else []
+    if not text:
+        return []
+
+    return [text]
 
 
-def join_text_list(value: Any) -> str:
-    """
-    감정·의도 배열을 TTS와 ESP32에서 읽기 쉬운
-    하나의 문자열로 합친다.
-    """
-
-    values = normalize_text_list(value)
-
-    return ", ".join(values)
+def join_text_list(
+    value: Any,
+) -> str:
+    return ", ".join(
+        normalize_text_list(value)
+    )
 
 
-def build_audio_url(message_id: str) -> str:
+def build_message_audio_url(
+    message_id: str,
+) -> str:
     return (
         f"{PUBLIC_BASE_URL}"
         f"/messages/{message_id}/audio"
@@ -182,11 +295,6 @@ def build_audio_url(message_id: str) -> str:
 def normalize_message(
     message: dict[str, Any],
 ) -> dict[str, Any]:
-    """
-    DB의 emotions/intents 배열과 함께
-    ESP32가 쉽게 읽을 단수형 emotion/intent도 반환한다.
-    """
-
     normalized = dict(message)
 
     emotions = normalize_text_list(
@@ -202,24 +310,73 @@ def normalize_message(
     normalized["emotions"] = emotions
     normalized["intents"] = intents
 
-    # ESP32용 단수형 문자열 필드
-    normalized["emotion"] = ", ".join(emotions)
-    normalized["intent"] = ", ".join(intents)
+    normalized["emotion"] = (
+        ", ".join(emotions)
+    )
+
+    normalized["intent"] = (
+        ", ".join(intents)
+    )
 
     message_id = str(
-        normalized.get("message_id", "")
+        normalized.get(
+            "message_id",
+            "",
+        )
     ).strip()
 
     if message_id:
-        normalized["audio_url"] = build_audio_url(
-            message_id
+        normalized["audio_url"] = (
+            build_message_audio_url(
+                message_id
+            )
         )
 
     return normalized
 
 
 # ==================================================
-# 5. TTS 문장 생성
+# 7. 메시지 조회 공통 함수
+# ==================================================
+
+def get_message_by_id(
+    message_id: str,
+) -> dict[str, Any]:
+    try:
+        response = (
+            supabase.table("messages")
+            .select("*")
+            .eq(
+                "message_id",
+                message_id,
+            )
+            .limit(1)
+            .execute()
+        )
+
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"메시지 조회 실패: {exc}"
+            ),
+        ) from exc
+
+    rows = response.data or []
+
+    if not rows:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "메시지를 찾을 수 없음."
+            ),
+        )
+
+    return rows[0]
+
+
+# ==================================================
+# 8. TTS 문장 생성
 # ==================================================
 
 def build_spoken_text(
@@ -248,20 +405,22 @@ def build_spoken_text(
 
     if emotion_text:
         parts.append(
-            f"이 메시지에 담긴 감정은 "
+            "이 메시지에 담긴 감정은 "
             f"{emotion_text}입니다."
         )
 
     if intent_text:
         parts.append(
-            f"이 메시지의 의도는 "
+            "이 메시지의 의도는 "
             f"{intent_text}입니다."
         )
 
     return " ".join(parts).strip()
 
 
-def safe_filename(value: str) -> str:
+def safe_filename(
+    value: str,
+) -> str:
     cleaned = re.sub(
         r"[^a-zA-Z0-9_-]",
         "_",
@@ -271,19 +430,26 @@ def safe_filename(value: str) -> str:
     return cleaned[:100] or "message"
 
 
-def create_tts_file(
+def create_message_tts_file(
     message: dict[str, Any],
 ) -> Path:
     message_id = str(
-        message.get("message_id", "")
+        message.get(
+            "message_id",
+            "",
+        )
     ).strip()
 
-    spoken_text = build_spoken_text(message)
+    spoken_text = build_spoken_text(
+        message
+    )
 
     if not spoken_text:
         raise HTTPException(
             status_code=400,
-            detail="TTS로 읽을 내용이 없음.",
+            detail=(
+                "TTS로 읽을 내용이 없음."
+            ),
         )
 
     text_hash = hashlib.sha256(
@@ -295,14 +461,20 @@ def create_tts_file(
         f"_{text_hash}.mp3"
     )
 
-    output_path = TTS_DIR / filename
+    output_path = (
+        TTS_DIR / filename
+    )
 
-    # 같은 문장은 다시 생성하지 않고 캐시 사용
     if (
         output_path.exists()
         and output_path.stat().st_size > 0
     ):
         return output_path
+
+    temporary_path = (
+        TTS_DIR
+        / f"{filename}.tmp"
+    )
 
     try:
         tts = gTTS(
@@ -311,15 +483,28 @@ def create_tts_file(
             slow=False,
         )
 
-        tts.save(str(output_path))
+        tts.save(
+            str(temporary_path)
+        )
 
-    except (gTTSError, OSError) as exc:
-        if output_path.exists():
-            output_path.unlink(missing_ok=True)
+        temporary_path.replace(
+            output_path
+        )
+
+    except (
+        gTTSError,
+        OSError,
+    ) as exc:
+        if temporary_path.exists():
+            temporary_path.unlink(
+                missing_ok=True
+            )
 
         raise HTTPException(
             status_code=500,
-            detail=f"TTS 생성 실패: {exc}",
+            detail=(
+                f"TTS 생성 실패: {exc}"
+            ),
         ) from exc
 
     if (
@@ -328,67 +513,135 @@ def create_tts_file(
     ):
         raise HTTPException(
             status_code=500,
-            detail="생성된 TTS 파일이 비어 있음.",
+            detail=(
+                "생성된 TTS 파일이 비어 있음."
+            ),
         )
 
     return output_path
 
 
 # ==================================================
-# 6. 메시지 조회 공통 함수
+# 9. 읽음 처리 공통 함수
 # ==================================================
 
-def get_message_by_id(
+def update_message_as_read(
     message_id: str,
 ) -> dict[str, Any]:
+    """
+    이미 읽은 메시지에 다시 요청해도
+    오류 없이 읽음 상태를 반환하도록 한다.
+    """
+
+    message = get_message_by_id(
+        message_id
+    )
+
+    if bool(message.get("is_read")):
+        return {
+            "success": True,
+            "message_id": message_id,
+            "is_read": True,
+            "read_at": message.get(
+                "read_at"
+            ),
+            "already_read": True,
+        }
+
+    read_at = datetime.now(
+        timezone.utc
+    ).isoformat()
+
     try:
         response = (
             supabase.table("messages")
-            .select("*")
-            .eq("message_id", message_id)
-            .limit(1)
+            .update({
+                "is_read": True,
+                "read_at": read_at,
+            })
+            .eq(
+                "message_id",
+                message_id,
+            )
             .execute()
         )
 
     except Exception as exc:
         raise HTTPException(
             status_code=500,
-            detail=f"메시지 조회 실패: {exc}",
+            detail=(
+                f"읽음 처리 실패: {exc}"
+            ),
         ) from exc
 
-    rows = response.data or []
-
-    if not rows:
+    if not response.data:
         raise HTTPException(
             status_code=404,
-            detail="메시지를 찾을 수 없음.",
+            detail=(
+                "메시지를 찾을 수 없음."
+            ),
         )
 
-    return rows[0]
+    return {
+        "success": True,
+        "message_id": message_id,
+        "is_read": True,
+        "read_at": read_at,
+        "already_read": False,
+    }
 
 
 # ==================================================
-# 7. 기본 API
+# 10. 기본 API
 # ==================================================
 
 @app.get("/")
-def root() -> dict[str, str]:
+def root() -> dict[str, Any]:
     return {
         "service": "grandtalk-api",
         "status": "ok",
+        "version": "1.2.0",
     }
 
 
 @app.get("/health")
 def health() -> dict[str, Any]:
+    system_audio_status = {
+        filename: (
+            SYSTEM_AUDIO_DIR
+            / filename
+        ).exists()
+        for filename
+        in SYSTEM_PROMPTS
+    }
+
     return {
         "status": "ok",
         "dictionary_size": len(records),
+        "system_audio": (
+            system_audio_status
+        ),
+    }
+
+
+@app.get("/system-audio")
+def system_audio_list() -> dict[str, Any]:
+    return {
+        "success": True,
+        "audio": {
+            filename: (
+                f"{PUBLIC_BASE_URL}"
+                f"/static/system/"
+                f"{filename}"
+            )
+            for filename
+            in SYSTEM_PROMPTS
+        },
     }
 
 
 # ==================================================
-# 8. 통역 API
+# 11. 통역
 # ==================================================
 
 @app.post("/translate")
@@ -408,13 +661,15 @@ def translate(
 
     return {
         "sender_id": request.sender_id,
-        "receiver_id": request.receiver_id,
+        "receiver_id": (
+            request.receiver_id
+        ),
         **result,
     }
 
 
 # ==================================================
-# 9. 메시지 생성
+# 12. 메시지 생성
 # ==================================================
 
 @app.post("/messages")
@@ -448,26 +703,59 @@ def create_message(
         result.get("intents")
     )
 
+    translated_text = (
+        corrected
+        or str(
+            result.get(
+                "translated",
+                "",
+            )
+        ).strip()
+        or str(
+            result.get(
+                "translated_raw",
+                "",
+            )
+        ).strip()
+        or str(
+            result.get(
+                "original",
+                request.text,
+            )
+        ).strip()
+    )
+
     message = {
         "message_id": message_id,
         "sender_id": request.sender_id,
-        "receiver_id": request.receiver_id,
-        "original_text": result["original"],
-        "translated_raw": result[
-            "translated_raw"
-        ],
-        "translated_text": (
-            corrected
-            or result["translated"]
+        "receiver_id": (
+            request.receiver_id
         ),
-        "detected_terms": result[
-            "detected_terms"
-        ],
+        "original_text": result.get(
+            "original",
+            request.text,
+        ),
+        "translated_raw": result.get(
+            "translated_raw",
+            translated_text,
+        ),
+        "translated_text": (
+            translated_text
+        ),
+        "detected_terms": result.get(
+            "detected_terms",
+            [],
+        ),
         "emotions": emotions,
         "intents": intents,
-        "warnings": result["warnings"],
-        "audio_url": build_audio_url(
-            message_id
+        "warnings": result.get(
+            "warnings",
+            [],
+        ),
+        "audio_url": (
+            build_message_audio_url(
+                message_id
+            )
         ),
         "is_read": False,
         "created_at": datetime.now(
@@ -486,7 +774,9 @@ def create_message(
     except Exception as exc:
         raise HTTPException(
             status_code=500,
-            detail=f"메시지 저장 실패: {exc}",
+            detail=(
+                f"메시지 저장 실패: {exc}"
+            ),
         ) from exc
 
     saved_message = (
@@ -504,10 +794,12 @@ def create_message(
 
 
 # ==================================================
-# 10. 읽지 않은 메시지 전체 조회
+# 13. 읽지 않은 메시지 조회
 # ==================================================
 
-@app.get("/devices/{receiver_id}/pending")
+@app.get(
+    "/devices/{receiver_id}/pending"
+)
 def pending(
     receiver_id: str,
 ) -> dict[str, Any]:
@@ -515,8 +807,14 @@ def pending(
         response = (
             supabase.table("messages")
             .select("*")
-            .eq("receiver_id", receiver_id)
-            .eq("is_read", False)
+            .eq(
+                "receiver_id",
+                receiver_id,
+            )
+            .eq(
+                "is_read",
+                False,
+            )
             .order("created_at")
             .execute()
         )
@@ -524,7 +822,9 @@ def pending(
     except Exception as exc:
         raise HTTPException(
             status_code=500,
-            detail=f"메시지 조회 실패: {exc}",
+            detail=(
+                f"메시지 조회 실패: {exc}"
+            ),
         ) from exc
 
     rows = response.data or []
@@ -541,11 +841,9 @@ def pending(
     }
 
 
-# ==================================================
-# 11. 다음 읽지 않은 메시지
-# ==================================================
-
-@app.get("/devices/{receiver_id}/next")
+@app.get(
+    "/devices/{receiver_id}/next"
+)
 def next_message(
     receiver_id: str,
 ) -> dict[str, Any]:
@@ -553,8 +851,14 @@ def next_message(
         response = (
             supabase.table("messages")
             .select("*")
-            .eq("receiver_id", receiver_id)
-            .eq("is_read", False)
+            .eq(
+                "receiver_id",
+                receiver_id,
+            )
+            .eq(
+                "is_read",
+                False,
+            )
             .order("created_at")
             .limit(1)
             .execute()
@@ -563,7 +867,9 @@ def next_message(
     except Exception as exc:
         raise HTTPException(
             status_code=500,
-            detail=f"메시지 조회 실패: {exc}",
+            detail=(
+                f"메시지 조회 실패: {exc}"
+            ),
         ) from exc
 
     rows = response.data or []
@@ -575,13 +881,15 @@ def next_message(
     )
 
     return {
-        "has_message": message is not None,
+        "has_message": (
+            message is not None
+        ),
         "message": message,
     }
 
 
 # ==================================================
-# 12. 단일 메시지 조회
+# 14. 단일 메시지 조회
 # ==================================================
 
 @app.get("/messages/{message_id}")
@@ -601,10 +909,12 @@ def get_message(
 
 
 # ==================================================
-# 13. 메시지 TTS MP3
+# 15. 메시지 TTS
 # ==================================================
 
-@app.get("/messages/{message_id}/audio")
+@app.get(
+    "/messages/{message_id}/audio"
+)
 def message_audio(
     message_id: str,
 ) -> FileResponse:
@@ -612,8 +922,10 @@ def message_audio(
         message_id
     )
 
-    output_path = create_tts_file(
-        message
+    output_path = (
+        create_message_tts_file(
+            message
+        )
     )
 
     return FileResponse(
@@ -629,46 +941,29 @@ def message_audio(
 
 
 # ==================================================
-# 14. 읽음 처리
+# 16. 읽음 처리
 # ==================================================
 
 @app.post("/messages/read")
 def mark_read(
     request: ReadRequest,
 ) -> dict[str, Any]:
-    read_at = datetime.now(
-        timezone.utc
-    ).isoformat()
+    return update_message_as_read(
+        request.message_id
+    )
 
-    try:
-        response = (
-            supabase.table("messages")
-            .update({
-                "is_read": True,
-                "read_at": read_at,
-            })
-            .eq(
-                "message_id",
-                request.message_id,
-            )
-            .execute()
-        )
 
-    except Exception as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"읽음 처리 실패: {exc}",
-        ) from exc
+@app.post(
+    "/messages/{message_id}/read"
+)
+def mark_read_by_path(
+    message_id: str,
+) -> dict[str, Any]:
+    """
+    ESP32에서 JSON 본문 없이 간단하게
+    호출하기 위한 읽음 처리 API.
+    """
 
-    if not response.data:
-        raise HTTPException(
-            status_code=404,
-            detail="메시지를 찾을 수 없음.",
-        )
-
-    return {
-        "success": True,
-        "message_id": request.message_id,
-        "is_read": True,
-        "read_at": read_at,
-    }
+    return update_message_as_read(
+        message_id
+    )
