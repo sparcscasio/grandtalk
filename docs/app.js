@@ -1,36 +1,38 @@
 "use strict";
 
 /*
- * config.js에서 설정한 값을 사용함.
+ * ==================================================
+ * 1. 서버 설정
+ * ==================================================
  *
- * 예:
+ * config.js에서 아래 형식 중 하나를 사용할 수 있다.
  *
  * window.GRANDTALK_CONFIG = {
- *   API_BASE_URL: "http://127.0.0.1:8000",
- *   DEFAULT_SENDER_ID: "grandchild_001",
- *   DEFAULT_RECEIVER_ID: "grandma_001"
+ *   API_BASE_URL:
+ *     "https://grandtalk-api.onrender.com"
  * };
+ *
+ * 또는
+ *
+ * window.API_BASE_URL =
+ *   "https://grandtalk-api.onrender.com";
  */
 
-const config = window.GRANDTALK_CONFIG ?? {};
-
 const API_BASE_URL = String(
-  config.API_BASE_URL ?? "http://127.0.0.1:8000"
+  window.GRANDTALK_CONFIG?.API_BASE_URL
+  || window.API_BASE_URL
+  || "https://grandtalk-api.onrender.com"
 ).replace(/\/+$/, "");
 
-const DEFAULT_SENDER_ID =
-  config.DEFAULT_SENDER_ID ?? "grandchild_001";
 
-const DEFAULT_RECEIVER_ID =
-  config.DEFAULT_RECEIVER_ID ?? "grandma_001";
-
-/* DOM 요소 */
+/*
+ * ==================================================
+ * 2. DOM 요소
+ * ==================================================
+ */
 
 const sourceText =
   document.getElementById("sourceText");
-
-const translatedText =
-  document.getElementById("translatedText");
 
 const senderId =
   document.getElementById("senderId");
@@ -44,29 +46,41 @@ const previewBtn =
 const clearBtn =
   document.getElementById("clearBtn");
 
-const sendBtn =
-  document.getElementById("sendBtn");
-
-const checkBtn =
-  document.getElementById("checkBtn");
-
-const statusElement =
+const status =
   document.getElementById("status");
-
-const sendStatusElement =
-  document.getElementById("sendStatus");
 
 const resultCard =
   document.getElementById("resultCard");
 
-const llmBadge =
-  document.getElementById("llmBadge");
+const translatedText =
+  document.getElementById("translatedText");
 
 const termList =
   document.getElementById("termList");
 
+const emotionOutput =
+  document.getElementById("emotionOutput");
+
+const intentOutput =
+  document.getElementById("intentOutput");
+
+const llmBadge =
+  document.getElementById("llmBadge");
+
+const sendBtn =
+  document.getElementById("sendBtn");
+
+const sendStatus =
+  document.getElementById("sendStatus");
+
+const checkBtn =
+  document.getElementById("checkBtn");
+
 const pendingOutput =
   document.getElementById("pendingOutput");
+
+const pendingCount =
+  document.getElementById("pendingCount");
 
 const successModal =
   document.getElementById("successModal");
@@ -76,71 +90,99 @@ const closeSuccessModalBtn =
     "closeSuccessModalBtn"
   );
 
-/* 초기 상태 */
 
-senderId.value = DEFAULT_SENDER_ID;
-receiverId.value = DEFAULT_RECEIVER_ID;
+/*
+ * ==================================================
+ * 3. 현재 상태
+ * ==================================================
+ */
 
-/* 공통 함수 */
+let currentTranslation = null;
+let isTranslating = false;
+let isSending = false;
+let isCheckingPending = false;
 
-function setStatus(
-  element,
-  message,
-  isError = false
-) {
-  element.textContent = message;
-  element.classList.toggle(
-    "error",
-    isError
-  );
+
+/*
+ * ==================================================
+ * 4. 초기값 복원
+ * ==================================================
+ */
+
+restoreSavedIdentifiers();
+
+
+/*
+ * ==================================================
+ * 5. 공통 함수
+ * ==================================================
+ */
+
+function normalizeText(value) {
+  return String(value ?? "").trim();
 }
 
-function getErrorMessage(
-  data,
-  fallback
-) {
-  if (!data) {
-    return fallback;
+
+function formatTextList(value) {
+  if (value === null || value === undefined) {
+    return "";
   }
 
-  if (typeof data.detail === "string") {
-    return data.detail;
-  }
-
-  if (Array.isArray(data.detail)) {
-    return data.detail
-      .map((item) => item.msg)
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => normalizeText(item))
       .filter(Boolean)
       .join(", ");
   }
 
-  if (typeof data.message === "string") {
-    return data.message;
+  if (typeof value === "object") {
+    return Object.values(value)
+      .map((item) => normalizeText(item))
+      .filter(Boolean)
+      .join(", ");
   }
 
-  return fallback;
+  return normalizeText(value);
 }
 
-async function parseResponse(response) {
-  let data = null;
 
-  try {
-    data = await response.json();
-  } catch {
-    data = null;
-  }
-
-  if (!response.ok) {
-    throw new Error(
-      getErrorMessage(
-        data,
-        `요청에 실패했어요. (${response.status})`
-      )
-    );
-  }
-
-  return data;
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
+
+
+function escapeAttribute(value) {
+  return escapeHtml(value)
+    .replaceAll("`", "&#096;");
+}
+
+
+function setStatus(
+  element,
+  message,
+  type = ""
+) {
+  if (!element) {
+    return;
+  }
+
+  element.textContent = message;
+  element.classList.remove(
+    "success",
+    "error",
+    "loading"
+  );
+
+  if (type) {
+    element.classList.add(type);
+  }
+}
+
 
 function setButtonLoading(
   button,
@@ -148,137 +190,101 @@ function setButtonLoading(
   loadingText,
   normalText
 ) {
-  button.disabled = loading;
-  button.classList.toggle(
-    "is-loading",
-    loading
-  );
-
-  button.textContent = loading
-    ? loadingText
-    : normalText;
-}
-
-function clearResult() {
-  translatedText.value = "";
-  termList.innerHTML = "";
-
-  llmBadge.textContent = "";
-  llmBadge.classList.add("hidden");
-
-  resultCard.classList.add("hidden");
-
-  setStatus(sendStatusElement, "");
-}
-
-function resetForm() {
-  sourceText.value = "";
-
-  senderId.value =
-    DEFAULT_SENDER_ID;
-
-  receiverId.value =
-    DEFAULT_RECEIVER_ID;
-
-  clearResult();
-
-  setStatus(statusElement, "");
-
-  sourceText.focus();
-}
-
-/* 탐색된 신조어 표시 */
-
-function renderDetectedTerms(terms) {
-  termList.innerHTML = "";
-
-  if (!Array.isArray(terms) || terms.length === 0) {
-    const emptyChip =
-      document.createElement("span");
-
-    emptyChip.className = "term-chip";
-    emptyChip.textContent =
-      "등록된 신조어가 발견되지 않음";
-
-    termList.appendChild(emptyChip);
-
+  if (!button) {
     return;
   }
 
-  for (const term of terms) {
-    const chip =
-      document.createElement("span");
+  button.disabled = loading;
+  button.textContent =
+    loading ? loadingText : normalText;
+}
 
-    chip.className = "term-chip";
 
-    const expression =
-      term.expression ??
-      term.matched_form ??
-      "표현";
+async function parseResponse(response) {
+  const contentType =
+    response.headers.get("content-type") || "";
 
-    const meaning =
-      term.meaning ??
-      term.translation ??
-      "";
+  if (
+    contentType.includes(
+      "application/json"
+    )
+  ) {
+    return response.json();
+  }
 
-    const strong =
-      document.createElement("strong");
+  const text = await response.text();
 
-    strong.textContent = expression;
+  return {
+    detail: text || "응답 본문이 없습니다.",
+  };
+}
 
-    chip.appendChild(strong);
 
-    if (meaning) {
-      chip.appendChild(
-        document.createTextNode(
-          ` · ${meaning}`
-        )
-      );
-    }
+async function requestJson(
+  url,
+  options = {}
+) {
+  const response = await fetch(
+    url,
+    options
+  );
 
-    termList.appendChild(chip);
+  const data = await parseResponse(
+    response
+  );
+
+  if (!response.ok) {
+    const message =
+      data?.detail
+      || data?.message
+      || `요청 실패 (${response.status})`;
+
+    throw new Error(
+      typeof message === "string"
+        ? message
+        : JSON.stringify(message)
+    );
+  }
+
+  return data;
+}
+
+
+function saveIdentifiers() {
+  localStorage.setItem(
+    "grandtalk.senderId",
+    senderId.value.trim()
+  );
+
+  localStorage.setItem(
+    "grandtalk.receiverId",
+    receiverId.value.trim()
+  );
+}
+
+
+function restoreSavedIdentifiers() {
+  const savedSender =
+    localStorage.getItem(
+      "grandtalk.senderId"
+    );
+
+  const savedReceiver =
+    localStorage.getItem(
+      "grandtalk.receiverId"
+    );
+
+  if (savedSender && senderId) {
+    senderId.value = savedSender;
+  }
+
+  if (savedReceiver && receiverId) {
+    receiverId.value = savedReceiver;
   }
 }
 
-/* 통역 방식 배지 */
 
-function renderTranslationBadge(data) {
-  const llmUsed =
-    Boolean(data.llm_used);
-
-  llmBadge.classList.remove("hidden");
-
-  if (llmUsed) {
-    llmBadge.textContent = "AI 문장 교정";
-  } else {
-    llmBadge.textContent = "규칙 기반";
-  }
-}
-
-/* 전송 완료 팝업 */
-
-function openSuccessModal() {
-  successModal.classList.remove("hidden");
-
-  document.body.style.overflow =
-    "hidden";
-
-  window.setTimeout(() => {
-    closeSuccessModalBtn.focus();
-  }, 50);
-}
-
-function closeSuccessModal() {
-  successModal.classList.add("hidden");
-
-  document.body.style.overflow = "";
-
-  sourceText.focus();
-}
-
-/* 통역 미리보기 */
-
-async function previewTranslation() {
+function validateCommonFields() {
   const text =
     sourceText.value.trim();
 
@@ -289,354 +295,789 @@ async function previewTranslation() {
     receiverId.value.trim();
 
   if (!text) {
-    setStatus(
-      statusElement,
-      "보낼 문장을 입력해 주세요.",
-      true
+    throw new Error(
+      "보낼 문장을 입력해 주세요."
+    );
+  }
+
+  if (!sender) {
+    throw new Error(
+      "보내는 사람을 입력해 주세요."
+    );
+  }
+
+  if (!receiver) {
+    throw new Error(
+      "받는 사람을 입력해 주세요."
+    );
+  }
+
+  return {
+    text,
+    sender,
+    receiver,
+  };
+}
+
+
+/*
+ * ==================================================
+ * 6. 통역 결과 표시
+ * ==================================================
+ */
+
+function renderTranslationResult(result) {
+  currentTranslation = result;
+
+  const translated =
+    normalizeText(result.translated)
+    || normalizeText(
+      result.translated_text
+    )
+    || normalizeText(
+      result.translated_raw
+    )
+    || normalizeText(result.original);
+
+  translatedText.value = translated;
+
+  renderDetectedTerms(
+    result.detected_terms || []
+  );
+
+  const emotion =
+    formatTextList(
+      result.emotion
+      || result.emotions
     );
 
-    sourceText.focus();
+  const intent =
+    formatTextList(
+      result.intent
+      || result.intents
+    );
+
+  emotionOutput.textContent =
+    emotion || "분석 결과 없음";
+
+  intentOutput.textContent =
+    intent || "분석 결과 없음";
+
+  renderLlmBadge(result);
+
+  resultCard.classList.remove(
+    "hidden"
+  );
+
+  resultCard.scrollIntoView({
+    behavior: "smooth",
+    block: "start",
+  });
+}
+
+
+function renderDetectedTerms(terms) {
+  if (!Array.isArray(terms)) {
+    terms = [];
+  }
+
+  if (terms.length === 0) {
+    termList.innerHTML = `
+      <p class="empty-message">
+        발견된 신조어가 없습니다.
+      </p>
+    `;
 
     return;
   }
 
-  if (!sender || !receiver) {
-    setStatus(
-      statusElement,
-      "보내는 사람과 받는 사람을 입력해 주세요.",
-      true
+  termList.innerHTML = terms
+    .map((term) => {
+      if (
+        typeof term === "string"
+      ) {
+        return `
+          <span class="term-chip">
+            ${escapeHtml(term)}
+          </span>
+        `;
+      }
+
+      const source =
+        normalizeText(
+          term.term
+          || term.source
+          || term.original
+          || term.word
+        );
+
+      const meaning =
+        normalizeText(
+          term.meaning
+          || term.translation
+          || term.replacement
+          || term.description
+        );
+
+      if (!source && !meaning) {
+        return "";
+      }
+
+      if (!meaning) {
+        return `
+          <span class="term-chip">
+            ${escapeHtml(source)}
+          </span>
+        `;
+      }
+
+      return `
+        <div class="term-item">
+          <strong>
+            ${escapeHtml(source)}
+          </strong>
+
+          <span>
+            ${escapeHtml(meaning)}
+          </span>
+        </div>
+      `;
+    })
+    .filter(Boolean)
+    .join("");
+}
+
+
+function renderLlmBadge(result) {
+  const usedLlm =
+    result.used_llm
+    ?? result.use_llm
+    ?? result.llm_used
+    ?? false;
+
+  const method =
+    normalizeText(
+      result.method
+      || result.translation_method
+    );
+
+  if (usedLlm) {
+    llmBadge.textContent =
+      method || "AI 통역";
+
+    llmBadge.classList.remove(
+      "hidden"
     );
 
     return;
   }
+
+  if (method) {
+    llmBadge.textContent = method;
+
+    llmBadge.classList.remove(
+      "hidden"
+    );
+
+    return;
+  }
+
+  llmBadge.classList.add(
+    "hidden"
+  );
+
+  llmBadge.textContent = "";
+}
+
+
+/*
+ * ==================================================
+ * 7. 통역 요청
+ * ==================================================
+ */
+
+async function handlePreview() {
+  if (isTranslating) {
+    return;
+  }
+
+  let fields;
+
+  try {
+    fields = validateCommonFields();
+  } catch (error) {
+    setStatus(
+      status,
+      error.message,
+      "error"
+    );
+
+    return;
+  }
+
+  isTranslating = true;
+
+  setStatus(
+    status,
+    "문장을 통역하고 있습니다.",
+    "loading"
+  );
 
   setButtonLoading(
     previewBtn,
     true,
-    "통역 중",
+    "통역 중...",
     "통역하기"
   );
 
-  clearResult();
-
-  setStatus(
-    statusElement,
-    "문장을 통역하고 있어요."
-  );
-
   try {
-    const response = await fetch(
+    saveIdentifiers();
+
+    const result = await requestJson(
       `${API_BASE_URL}/translate`,
       {
         method: "POST",
-
         headers: {
           "Content-Type":
-            "application/json"
+            "application/json",
         },
-
         body: JSON.stringify({
-          text,
-          sender_id: sender,
-          receiver_id: receiver
-        })
+          text: fields.text,
+          sender_id: fields.sender,
+          receiver_id: fields.receiver,
+          use_llm: true,
+        }),
       }
     );
 
-    const data =
-      await parseResponse(response);
+    renderTranslationResult(result);
 
-    translatedText.value =
-      data.translated ??
-      data.translated_rule_based ??
-      data.translated_raw ??
-      text;
-
-    renderDetectedTerms(
-      data.detected_terms
-    );
-
-    renderTranslationBadge(data);
-
-    resultCard.classList.remove(
-      "hidden"
+    setStatus(
+      status,
+      "통역이 완료되었습니다.",
+      "success"
     );
 
     setStatus(
-      statusElement,
-      "통역이 완료되었어요."
+      sendStatus,
+      ""
     );
-
-    resultCard.scrollIntoView({
-      behavior: "smooth",
-      block: "start"
-    });
   } catch (error) {
     console.error(error);
 
     setStatus(
-      statusElement,
-      error instanceof Error
-        ? error.message
-        : "통역 중 오류가 발생했어요.",
-      true
+      status,
+      error.message
+      || "통역 중 오류가 발생했습니다.",
+      "error"
     );
   } finally {
+    isTranslating = false;
+
     setButtonLoading(
       previewBtn,
       false,
-      "통역 중",
+      "통역 중...",
       "통역하기"
     );
   }
 }
 
-/* 수정한 통역문 전송 */
 
-async function sendMessage() {
-  const originalText =
-    sourceText.value.trim();
+/*
+ * ==================================================
+ * 8. 메시지 전송
+ * ==================================================
+ */
 
-  const correctedText =
+async function handleSend() {
+  if (isSending) {
+    return;
+  }
+
+  let fields;
+
+  try {
+    fields = validateCommonFields();
+  } catch (error) {
+    setStatus(
+      sendStatus,
+      error.message,
+      "error"
+    );
+
+    return;
+  }
+
+  const corrected =
     translatedText.value.trim();
 
-  const sender =
-    senderId.value.trim();
-
-  const receiver =
-    receiverId.value.trim();
-
-  if (!originalText) {
+  if (!corrected) {
     setStatus(
-      sendStatusElement,
-      "보낼 원문이 없습니다.",
-      true
-    );
-
-    return;
-  }
-
-  if (!correctedText) {
-    setStatus(
-      sendStatusElement,
+      sendStatus,
       "전송할 통역문을 입력해 주세요.",
-      true
-    );
-
-    translatedText.focus();
-
-    return;
-  }
-
-  if (!sender || !receiver) {
-    setStatus(
-      sendStatusElement,
-      "보내는 사람과 받는 사람을 입력해 주세요.",
-      true
+      "error"
     );
 
     return;
   }
+
+  isSending = true;
+
+  setStatus(
+    sendStatus,
+    "조부모 기기로 전송하고 있습니다.",
+    "loading"
+  );
 
   setButtonLoading(
     sendBtn,
     true,
-    "전송 중",
+    "전송 중...",
     "수정한 문장 전송"
   );
 
-  setStatus(
-    sendStatusElement,
-    "조부모님의 기기로 전송하고 있어요."
-  );
-
   try {
-    const response = await fetch(
+    saveIdentifiers();
+
+    const result = await requestJson(
       `${API_BASE_URL}/messages`,
       {
         method: "POST",
-
         headers: {
           "Content-Type":
-            "application/json"
+            "application/json",
         },
-
         body: JSON.stringify({
-          text: originalText,
-          sender_id: sender,
-          receiver_id: receiver,
-          corrected_text: correctedText
-        })
+          text: fields.text,
+          corrected_text: corrected,
+          sender_id: fields.sender,
+          receiver_id: fields.receiver,
+          use_llm: true,
+        }),
       }
     );
 
-    await parseResponse(response);
+    const savedMessage =
+      result.message || {};
 
-    /*
-     * 전송 성공 후 통역 결과 section을 숨김.
-     */
-    resultCard.classList.add("hidden");
+    console.log(
+      "저장된 메시지:",
+      savedMessage
+    );
 
-    /*
-     * 입력 문장을 비움.
-     * 보내는 사람과 받는 사람은 다음 전송을 위해 유지함.
-     */
-    sourceText.value = "";
-    translatedText.value = "";
+    setStatus(
+      sendStatus,
+      "전송이 완료되었습니다.",
+      "success"
+    );
 
-    termList.innerHTML = "";
+    showSuccessModal();
 
-    llmBadge.textContent = "";
-    llmBadge.classList.add("hidden");
-
-    setStatus(statusElement, "");
-    setStatus(sendStatusElement, "");
-
-    /*
-     * 중앙 팝업 표시
-     */
-    openSuccessModal();
+    await refreshPendingInbox({
+      silent: true,
+    });
   } catch (error) {
     console.error(error);
 
     setStatus(
-      sendStatusElement,
-      error instanceof Error
-        ? error.message
-        : "메시지 전송 중 오류가 발생했어요.",
-      true
+      sendStatus,
+      error.message
+      || "메시지 전송에 실패했습니다.",
+      "error"
     );
   } finally {
+    isSending = false;
+
     setButtonLoading(
       sendBtn,
       false,
-      "전송 중",
+      "전송 중...",
       "수정한 문장 전송"
     );
   }
 }
 
-/* 기기 수신함 조회 */
 
-async function checkPendingMessages() {
+/*
+ * ==================================================
+ * 9. 대기 메시지 조회
+ * ==================================================
+ */
+
+async function refreshPendingInbox(
+  options = {}
+) {
+  const silent =
+    Boolean(options.silent);
+
+  if (isCheckingPending) {
+    return;
+  }
+
   const receiver =
     receiverId.value.trim();
 
   if (!receiver) {
-    pendingOutput.textContent =
-      "받는 사람을 입력해 주세요.";
+    pendingCount.classList.add(
+      "hidden"
+    );
+
+    pendingOutput.innerHTML = `
+      <p class="empty-message error">
+        받는 사람을 입력해 주세요.
+      </p>
+    `;
 
     return;
   }
 
-  setButtonLoading(
-    checkBtn,
-    true,
-    "조회 중",
-    "현재 수신함 확인"
-  );
+  isCheckingPending = true;
 
-  pendingOutput.textContent =
-    "읽지 않은 메시지를 조회하고 있어요.";
-
-  try {
-    const response = await fetch(
-      `${API_BASE_URL}/devices/${encodeURIComponent(
-        receiver
-      )}/pending`
+  if (!silent) {
+    setButtonLoading(
+      checkBtn,
+      true,
+      "조회 중...",
+      "현재 수신함 확인"
     );
 
-    const data =
-      await parseResponse(response);
+    pendingOutput.innerHTML = `
+      <p class="empty-message">
+        메시지를 불러오는 중입니다.
+      </p>
+    `;
+  }
 
-    const messages =
-      Array.isArray(data.messages)
-        ? data.messages
-        : [];
+  try {
+    saveIdentifiers();
 
-    if (messages.length === 0) {
-      pendingOutput.textContent =
-        "현재 대기 중인 메시지가 없음.";
+    const result = await requestJson(
+      `${API_BASE_URL}/devices/`
+      + `${encodeURIComponent(receiver)}`
+      + "/pending"
+    );
 
-      return;
-    }
-
-    const output = messages
-      .map((message, index) => {
-        const createdAt =
-          message.created_at
-            ? new Date(
-                message.created_at
-              ).toLocaleString("ko-KR")
-            : "시간 정보 없음";
-
-        return [
-          `[메시지 ${index + 1}]`,
-          `보낸 사람: ${
-            message.sender_id ??
-            "알 수 없음"
-          }`,
-          `받는 사람: ${
-            message.receiver_id ??
-            receiver
-          }`,
-          `원문: ${
-            message.original_text ??
-            ""
-          }`,
-          `통역문: ${
-            message.translated_text ??
-            ""
-          }`,
-          `전송 시각: ${createdAt}`
-        ].join("\n");
-      })
-      .join("\n\n");
-
-    pendingOutput.textContent = output;
+    renderPendingMessages(
+      result.messages || []
+    );
   } catch (error) {
     console.error(error);
 
-    pendingOutput.textContent =
-      error instanceof Error
-        ? error.message
-        : "수신함 조회 중 오류가 발생했어요.";
-  } finally {
-    setButtonLoading(
-      checkBtn,
-      false,
-      "조회 중",
-      "현재 수신함 확인"
+    pendingCount.classList.add(
+      "hidden"
     );
+
+    pendingOutput.innerHTML = `
+      <p class="empty-message error">
+        ${escapeHtml(
+          error.message
+          || "수신함 조회에 실패했습니다."
+        )}
+      </p>
+    `;
+  } finally {
+    isCheckingPending = false;
+
+    if (!silent) {
+      setButtonLoading(
+        checkBtn,
+        false,
+        "조회 중...",
+        "현재 수신함 확인"
+      );
+    }
   }
 }
 
-/* 이벤트 연결 */
+
+function renderPendingMessages(messages) {
+  if (!Array.isArray(messages)) {
+    messages = [];
+  }
+
+  pendingCount.textContent =
+    `${messages.length}개`;
+
+  pendingCount.classList.toggle(
+    "hidden",
+    messages.length === 0
+  );
+
+  if (messages.length === 0) {
+    pendingOutput.innerHTML = `
+      <p class="empty-message">
+        조회된 읽지 않은 메시지가 없습니다.
+      </p>
+    `;
+
+    return;
+  }
+
+  pendingOutput.innerHTML = messages
+    .map((message, index) => {
+      const emotion =
+        formatTextList(
+          message.emotion
+          || message.emotions
+        )
+        || "분석 결과 없음";
+
+      const intent =
+        formatTextList(
+          message.intent
+          || message.intents
+        )
+        || "분석 결과 없음";
+
+      const messageId =
+        normalizeText(
+          message.message_id
+        );
+
+      const audioUrl =
+        normalizeText(
+          message.audio_url
+        )
+        || (
+          `${API_BASE_URL}/messages/`
+          + `${encodeURIComponent(
+            messageId
+          )}/audio`
+        );
+
+      const createdAt =
+        formatDateTime(
+          message.created_at
+        );
+
+      return `
+        <article class="message-item">
+          <div class="message-meta">
+            <strong>
+              메시지 ${index + 1}
+            </strong>
+
+            <span class="unread-label">
+              읽지 않음
+            </span>
+          </div>
+
+          <dl class="message-details">
+            <div>
+              <dt>보낸 사람</dt>
+
+              <dd>
+                ${escapeHtml(
+                  message.sender_id || "-"
+                )}
+              </dd>
+            </div>
+
+            <div>
+              <dt>도착 시간</dt>
+
+              <dd>
+                ${escapeHtml(
+                  createdAt || "-"
+                )}
+              </dd>
+            </div>
+
+            <div>
+              <dt>원문</dt>
+
+              <dd>
+                ${escapeHtml(
+                  message.original_text || "-"
+                )}
+              </dd>
+            </div>
+
+            <div>
+              <dt>통역문</dt>
+
+              <dd>
+                ${escapeHtml(
+                  message.translated_text
+                  || message.translated_raw
+                  || "-"
+                )}
+              </dd>
+            </div>
+
+            <div>
+              <dt>감정</dt>
+
+              <dd>
+                ${escapeHtml(emotion)}
+              </dd>
+            </div>
+
+            <div>
+              <dt>의도</dt>
+
+              <dd>
+                ${escapeHtml(intent)}
+              </dd>
+            </div>
+          </dl>
+
+          <div class="message-audio">
+            <p class="analysis-label">
+              TTS 미리 듣기
+            </p>
+
+            <audio
+              controls
+              preload="none"
+              src="${escapeAttribute(
+                audioUrl
+              )}"
+            >
+              오디오를 재생할 수 없습니다.
+            </audio>
+          </div>
+        </article>
+      `;
+    })
+    .join("");
+}
+
+
+function formatDateTime(value) {
+  const raw = normalizeText(value);
+
+  if (!raw) {
+    return "";
+  }
+
+  const date = new Date(raw);
+
+  if (
+    Number.isNaN(date.getTime())
+  ) {
+    return raw;
+  }
+
+  return new Intl.DateTimeFormat(
+    "ko-KR",
+    {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    }
+  ).format(date);
+}
+
+
+/*
+ * ==================================================
+ * 10. 초기화
+ * ==================================================
+ */
+
+function handleClear() {
+  sourceText.value = "";
+  translatedText.value = "";
+
+  currentTranslation = null;
+
+  termList.innerHTML = "";
+
+  emotionOutput.textContent =
+    "분석 결과 없음";
+
+  intentOutput.textContent =
+    "분석 결과 없음";
+
+  llmBadge.textContent = "";
+  llmBadge.classList.add(
+    "hidden"
+  );
+
+  resultCard.classList.add(
+    "hidden"
+  );
+
+  setStatus(status, "");
+  setStatus(sendStatus, "");
+
+  sourceText.focus();
+}
+
+
+/*
+ * ==================================================
+ * 11. 성공 모달
+ * ==================================================
+ */
+
+function showSuccessModal() {
+  successModal.classList.remove(
+    "hidden"
+  );
+
+  document.body.classList.add(
+    "modal-open"
+  );
+
+  closeSuccessModalBtn.focus();
+}
+
+
+function closeSuccessModal() {
+  successModal.classList.add(
+    "hidden"
+  );
+
+  document.body.classList.remove(
+    "modal-open"
+  );
+
+  sendBtn.focus();
+}
+
+
+/*
+ * ==================================================
+ * 12. 이벤트 연결
+ * ==================================================
+ */
 
 previewBtn.addEventListener(
   "click",
-  previewTranslation
+  handlePreview
 );
 
-clearBtn.addEventListener(
-  "click",
-  resetForm
-);
 
 sendBtn.addEventListener(
   "click",
-  sendMessage
+  handleSend
 );
+
+
+clearBtn.addEventListener(
+  "click",
+  handleClear
+);
+
 
 checkBtn.addEventListener(
   "click",
-  checkPendingMessages
+  () => {
+    refreshPendingInbox();
+  }
 );
+
 
 closeSuccessModalBtn.addEventListener(
   "click",
   closeSuccessModal
 );
+
 
 successModal.addEventListener(
   "click",
@@ -647,47 +1088,51 @@ successModal.addEventListener(
   }
 );
 
+
 document.addEventListener(
   "keydown",
   (event) => {
     if (
-      event.key === "Escape" &&
-      !successModal.classList.contains(
+      event.key === "Escape"
+      && !successModal.classList.contains(
         "hidden"
       )
     ) {
       closeSuccessModal();
     }
 
-    /*
-     * 원문 입력창에서 Ctrl+Enter 또는 Command+Enter로 통역함.
-     */
     if (
-      (event.ctrlKey || event.metaKey) &&
-      event.key === "Enter" &&
-      document.activeElement === sourceText
+      event.key === "Enter"
+      && (
+        event.ctrlKey
+        || event.metaKey
+      )
+      && document.activeElement
+         === sourceText
     ) {
-      previewTranslation();
+      handlePreview();
     }
   }
 );
 
-/* 서비스 워커 등록 */
 
-if ("serviceWorker" in navigator) {
-  window.addEventListener(
-    "load",
-    async () => {
-      try {
-        await navigator.serviceWorker.register(
-          "./service-worker.js"
-        );
-      } catch (error) {
-        console.warn(
-          "서비스 워커 등록 실패:",
-          error
-        );
-      }
-    }
-  );
-}
+senderId.addEventListener(
+  "change",
+  saveIdentifiers
+);
+
+
+receiverId.addEventListener(
+  "change",
+  saveIdentifiers
+);
+
+
+/*
+ * ==================================================
+ * 13. 시작 상태
+ * ==================================================
+ */
+
+setStatus(status, "");
+setStatus(sendStatus, "");

@@ -68,6 +68,7 @@
             id="senderId"
             type="text"
             autocomplete="off"
+            placeholder="grandchild_001"
           />
         </label>
 
@@ -78,6 +79,7 @@
             id="receiverId"
             type="text"
             autocomplete="off"
+            placeholder="grandma_001"
           />
         </label>
       </div>
@@ -131,13 +133,36 @@
       <textarea
         id="translatedText"
         rows="5"
-        maxlength="500"
+        maxlength="1000"
       ></textarea>
 
       <div
         id="termList"
         class="terms"
       ></div>
+
+      <!-- 감정·의도 표시 -->
+      <div class="analysis-grid">
+        <div class="analysis-item">
+          <span class="analysis-label">
+            감정
+          </span>
+
+          <p id="emotionOutput">
+            분석 결과 없음
+          </p>
+        </div>
+
+        <div class="analysis-item">
+          <span class="analysis-label">
+            의도
+          </span>
+
+          <p id="intentOutput">
+            분석 결과 없음
+          </p>
+        </div>
+      </div>
 
       <div class="actions">
         <button
@@ -158,11 +183,21 @@
 
     <!-- 기기 수신함 확인 영역 -->
     <section class="card compact">
-      <h2>기기 대기 메시지</h2>
+      <div class="result-head">
+        <div>
+          <h2>기기 대기 메시지</h2>
 
-      <p class="section-description">
-        현재 받는 사람에게 도착한 읽지 않은 메시지를 확인함.
-      </p>
+          <p class="section-description">
+            현재 받는 사람에게 도착한
+            읽지 않은 메시지를 확인함.
+          </p>
+        </div>
+
+        <span
+          id="pendingCount"
+          class="badge hidden"
+        ></span>
+      </div>
 
       <button
         id="checkBtn"
@@ -172,7 +207,15 @@
         현재 수신함 확인
       </button>
 
-      <pre id="pendingOutput">아직 조회하지 않음.</pre>
+      <div
+        id="pendingOutput"
+        class="pending-output"
+        aria-live="polite"
+      >
+        <p class="empty-message">
+          아직 조회하지 않음.
+        </p>
+      </div>
     </section>
   </main>
 
